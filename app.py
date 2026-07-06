@@ -10,7 +10,9 @@ try:
 except Exception:
     config_ok = False
 
+# --- FUNÇÃO AUXILIAR CORRIGIDA ---
 def limpar_ip(ip):
+    """Remove protocolos e barras caso tenham sido digitados por engano"""
     if not ip:
         return ""
     return ip.replace("https://", "").replace("http://", "").strip("/")
@@ -18,106 +20,77 @@ def limpar_ip(ip):
 # --- 2. FUNÇÕES DE API ---
 def obter_token():
     ip_limpo = limpar_ip(IMASTER_IP)
+    PORTA_API = "443"
+    url = f"https://{ip_limpo}:{PORTA_API}/v1/auth/tokens"
     
-    # Lista focando nas portas REAIS de API Northbound do iMaster WAN/Core
-    combinacoes = [
-        # Tentativas na porta 26335 (Padrão de APIs NCE-IP)
-        {"url": f"https://{ip_limpo}:26335/rest/plat/v1/auth/tokens", "tipo": "wan_estrito"},
-        {"url": f"https://{ip_limpo}:26335/rest/v1/auth/tokens", "tipo": "wan_direto"},
-        
-        # Tentativas na porta 31943 (Gateway Unificado de Microserviços)
-        {"url": f"https://{ip_limpo}:31943/rest/plat/v1/auth/tokens", "tipo": "wan_estrito"},
-        {"url": f"https://{ip_limpo}:31943/rest/openapi/v1/auth/tokens", "tipo": "openapi"},
-        
-        # Mantém a 18002 caso seja um módulo Campus isolado
-        {"url": f"https://{ip_limpo}:18002/v1/auth/tokens", "tipo": "campus"}
-    ]
-    
+    headers = {"Content-Type": "application/json"}
+    payload = {"userName": USERNAME, "password": PASSWORD}
     requests.packages.urllib3.disable_warnings() 
-    erros_tentativas = []
-    
-    for item in combinacoes:
-        url = item["url"]
-        
-        if item["tipo"] == "wan_estrito":
-            payload = {"authParams": {"userName": USERNAME, "password": PASSWORD}}
+    try:
+        response = requests.post(url, json=payload, headers=headers, verify=False, timeout=5)
+        if response.status_code in [200, 201]:
+            return response.json()['data']['token_id']
         else:
-            payload = {"userName": USERNAME, "password": PASSWORD}
-            
-        try:
-            response = requests.post(url, json=payload, headers={"Content-Type": "application/json"}, verify=False, timeout=5)
-            if response.status_code in [200, 201]:
-                dados = response.json()
-                for chave_data in ['data', 'authResult']:
-                    if chave_data in dados and 'token_id' in dados[chave_data]:
-                        return dados[chave_data]['token_id']
-                    if chave_data in dados and 'token' in dados[chave_data]:
-                        return dados[chave_data]['token']
-                        
-                if 'token' in dados: return dados['token']
-                if 'access_token' in dados: return dados['access_token']
-                if 'token_id' in dados: return dados['token_id']
-            else:
-                erros_tentativas.append(f"Rota {url} retornou HTTP {response.status_code}")
-        except Exception as e:
-            erros_tentativas.append(f"Rota {url} falhou: {e}")
-            continue
-            
-    st.session_state['erros_login'] = erros_tentativas
-    return None
-@st.cache_data(ttl=300)
-def listar_todos_os_elementos(token):
+            st.error(f"Falha na autenticação do iMaster. Status: {response.status_code}")
+            return None
+    except Exception as e:
+        st.error(f"Erro de conexão com o iMaster ao gerar Token: {e}")
+        return None
+
+def buscar_dados_localidade(nome_localidade, token):
     ip_limpo = limpar_ip(IMASTER_IP)
+    PORTA_API = "443"
     headers = {"X-AUTH-TOKEN": token, "Content-Type": "application/json"}
     
-    # Rota 1: OpenAPI Nodes
-    url_openapi = f"https://{ip_limpo}:18008/rest/openapi/network/v1/nodes"
+    url_site = f"https://{ip_limpo}:{PORTA_API}/controller/campus/v1/sdwan/net/sites?name={nome_localidade}"
+    
     try:
-        response = requests.get(url_openapi, headers=headers, verify=False, timeout=5)
-        if response.status_code == 200:
-            dados = response.json().get('data', [])
-            if dados: return {node['name']: node['id'] for node in dados if 'name' in node}
-    except Exception: pass
-
-    # Rota 2: RESTCONF
-    url_ne = f"https://{ip_limpo}:18008/rest/netconf-data/v1/network-elements"
-    try:
-        response = requests.get(url_ne, headers=headers, verify=False, timeout=5)
-        if response.status_code == 200:
-            dados = response.json().get('network-elements', {}).get('network-element', [])
-            if dados: return {ne['name']: ne['ne-id'] for ne in dados if 'name' in ne}
-    except Exception: pass
+        res_site = requests.get(url_site, headers=headers, verify=False, timeout=10)
         
-    return {}
+        # DEBUG: Mostra o JSON que o iMaster retornou para sabermos se o site existe
+        st.write("--- DEBUG SITE ---")
+        st.json(res_site.json()) 
+        
+        dados_site = res_site.json().get('data')
+        if not dados_site or len(dados_site) == 0:
+            return None, f"O iMaster respondeu, mas não encontrou nenhum site com o nome: '{nome_localidade}'. Verifique maiúsculas/minúsculas."
+            
+        site_id = dados_site[0]['id']
+        url_alarmes = f"https://{ip_limpo}:{PORTA_API}/controller/campus/v1/alarms?siteId={site_id}&status=active"
+        res_alarmes = requests.get(url_alarmes, headers=headers, verify=False, timeout=10)
+        
+        # DEBUG: Mostra os alarmes que o iMaster retornou para este ID de site
+        st.write("--- DEBUG ALARMES ---")
+        st.json(res_alarmes.json())
+        
+        alarmes = res_alarmes.json().get('data', [])
+        return alarmes, None
+    except Exception as e:
+        return None, f"Erro ao consultar dados do site: {e}"
 
 # --- 3. INTERFACE GRÁFICA ---
-st.set_page_config(page_title="O&M iMaster Huawei", page_icon="🌐")
-st.title("🌐 Portal de Troubleshooting Inteligente - Huawei iMaster")
+st.set_page_config(page_title="Troubleshooting iMaster", page_icon="🌐")
+st.title("🌐 Portal de Troubleshooting - iMaster NCE")
 
 if not config_ok:
-    st.error("⚠️ Configuração Incompleta nos Secrets do Streamlit.")
+    st.error("⚠️ Configuração Incompleta! Você precisa adicionar IMASTER_IP, USERNAME e PASSWORD nos 'Secrets' do Streamlit Cloud.")
 else:
-    token_atual = None
-    dicionario_pontos = {}
-
-    with st.spinner("Conectando ao barramento de API do iMaster..."):
-        token_atual = obter_token()
-        if token_atual:
-            dicionario_pontos = listar_todos_os_elements(token_atual)
-
-    # SE CONECTOU E TROUXE ELEMENTOS
-    if dicionario_pontos:
-        st.success(f"Sucesso! {len(dicionario_pontos)} localidades mapeadas.")
-        lista_nomes = sorted(list(dicionario_pontos.keys()))
-        ponto_selecionado = st.selectbox("Selecione o Ponto/Circuito para Análise:", lista_nomes)
+    st.write("Digite o nome da localidade para analisar a saúde do ponto.")
     
-    # SE FALHOU EM TUDO (Evita a tela em branco que aconteceu na imagem)
-    else:
-        if not token_atual:
-            st.error("❌ Falha crítica de Autenticação. Nenhuma rota de login funcionou.")
-            if 'erros_login' in st.session_state:
-                with st.expander("Clique aqui para ver o log técnico do erro"):
-                    for err in st.session_state['erros_login']:
-                        st.code(err)
+    localidade_pesquisada = st.text_input("Nome da Localidade:")
+    
+    if st.button("Analisar Ponto"):
+        if not localidade_pesquisada:
+            st.warning("Por favor, digite o nome de uma localidade.")
         else:
-            st.warning("⚠️ Conectado com sucesso, mas o inventário de equipamentos retornou vazio (Verifique as permissões do seu usuário no iMaster).")
+            with st.spinner("Conectando ao iMaster NCE..."):
+                token = obter_token()
+                if token:
+                    alarmes, erro = buscar_dados_localidade(localidade_pesquisada, token)
+                    if erro:
+                        st.error(erro)
+                    elif len(alarmes) == 0:
+                        st.success("✅ **STATUS: SAUDÁVEL**. Nenhum alarme ativo.")
+                    else:
+                        st.error(f"❌ **STATUS: COM PROBLEMA ({len(alarmes)} alarme(s) ativo(s))**")
+                        st.write(alarmes)
