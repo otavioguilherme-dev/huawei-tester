@@ -27,21 +27,35 @@ def obter_token():
     return None
 
 def buscar_dados_localidade(nome_localidade, token):
+    ip_limpo = limpar_ip(IMASTER_IP)
+    PORTA_API = "18002"
     headers = {"X-AUTH-TOKEN": token, "Content-Type": "application/json"}
-    url_site = f"https://{IMASTER_IP}:18002/controller/campus/v1/sdwan/net/sites?name={nome_localidade}"
+    
+    url_site = f"https://{ip_limpo}:{PORTA_API}/controller/campus/v1/sdwan/net/sites?name={nome_localidade}"
     
     try:
-        res_site = requests.get(url_site, headers=headers, verify=False, timeout=5)
-        if not res_site.json().get('data'):
-            return None, "Localidade não encontrada no inventário do iMaster."
+        res_site = requests.get(url_site, headers=headers, verify=False, timeout=10)
+        
+        # DEBUG: Vamos ver o que o iMaster respondeu ao buscar o site
+        st.write("--- DEBUG SITE ---")
+        st.json(res_site.json()) # Isso vai cuspir o JSON na tela para você ver
+        
+        dados_site = res_site.json().get('data')
+        if not dados_site or len(dados_site) == 0:
+            return None, f"O iMaster respondeu com sucesso, mas não encontrou nenhum site com o nome exato: '{nome_localidade}'."
             
-        site_id = res_site.json()['data'][0]['id']
-        url_alarmes = f"https://{IMASTER_IP}:18002/controller/campus/v1/alarms?siteId={site_id}&status=active"
-        res_alarmes = requests.get(url_alarmes, headers=headers, verify=False, timeout=5)
+        site_id = dados_site[0]['id']
+        url_alarmes = f"https://{ip_limpo}:{PORTA_API}/controller/campus/v1/alarms?siteId={site_id}&status=active"
+        res_alarmes = requests.get(url_alarmes, headers=headers, verify=False, timeout=10)
+        
+        # DEBUG: Vamos ver os alarmes devolvidos
+        st.write("--- DEBUG ALARMES ---")
+        st.json(res_alarmes.json())
+        
         alarmes = res_alarmes.json().get('data', [])
         return alarmes, None
     except Exception as e:
-        return None, f"Erro ao consultar dados: {e}"
+        return None, f"Erro ao consultar dados do site: {e}"
 
 # --- 3. INTERFACE GRÁFICA (Sempre renderiza) ---
 st.set_page_config(page_title="Troubleshooting iMaster", page_icon="🌐")
