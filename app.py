@@ -19,17 +19,17 @@ def limpar_ip(ip):
 def obter_token():
     ip_limpo = limpar_ip(IMASTER_IP)
     
-    # Lista expandida com as rotas oficiais de operadoras/WAN da Huawei
+    # Lista focando nas portas REAIS de API Northbound do iMaster WAN/Core
     combinacoes = [
-        # 1. Rota Direta (Comum no iMaster NCE IP/Transporte na porta 18008)
-        {"url": f"https://{ip_limpo}:18008/rest/v1/auth/tokens", "tipo": "wan_direto"},
+        # Tentativas na porta 26335 (Padrão de APIs NCE-IP)
+        {"url": f"https://{ip_limpo}:26335/rest/plat/v1/auth/tokens", "tipo": "wan_estrito"},
+        {"url": f"https://{ip_limpo}:26335/rest/v1/auth/tokens", "tipo": "wan_direto"},
         
-        # 2. Rota de Assinatura/Token de Segurança OpenAPI Huawei
-        {"url": f"https://{ip_limpo}:18008/rest/openapi/v1/signature", "tipo": "signature"},
+        # Tentativas na porta 31943 (Gateway Unificado de Microserviços)
+        {"url": f"https://{ip_limpo}:31943/rest/plat/v1/auth/tokens", "tipo": "wan_estrito"},
+        {"url": f"https://{ip_limpo}:31943/rest/openapi/v1/auth/tokens", "tipo": "openapi"},
         
-        # 3. Rotas anteriores (mantidas para cobertura)
-        {"url": f"https://{ip_limpo}:18008/rest/openapi/v1/auth/tokens", "tipo": "openapi"},
-        {"url": f"https://{ip_limpo}:18008/rest/plat/v1/auth/tokens", "tipo": "wan_estrito"},
+        # Mantém a 18002 caso seja um módulo Campus isolado
         {"url": f"https://{ip_limpo}:18002/v1/auth/tokens", "tipo": "campus"}
     ]
     
@@ -48,8 +48,6 @@ def obter_token():
             response = requests.post(url, json=payload, headers={"Content-Type": "application/json"}, verify=False, timeout=5)
             if response.status_code in [200, 201]:
                 dados = response.json()
-                
-                # Garante a captura do Token independente do nome da chave retornada
                 for chave_data in ['data', 'authResult']:
                     if chave_data in dados and 'token_id' in dados[chave_data]:
                         return dados[chave_data]['token_id']
