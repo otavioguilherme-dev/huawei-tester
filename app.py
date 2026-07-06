@@ -20,7 +20,7 @@ def limpar_ip(ip):
 # --- 2. FUNÇÕES DE API ---
 def obter_token():
     ip_limpo = limpar_ip(IMASTER_IP)
-    PORTA_API = "18008" # Porta padrão comum
+    PORTA_API = "18002" # Porta padrão comum
     
     # Lista de todas as rotas possíveis de autenticação da Huawei
     rotas_para_testar = [
