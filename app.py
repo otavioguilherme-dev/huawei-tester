@@ -19,7 +19,15 @@ def limpar_ip(ip):
 def obter_token():
     ip_limpo = limpar_ip(IMASTER_IP)
     
+    # Lista expandida com as rotas oficiais de operadoras/WAN da Huawei
     combinacoes = [
+        # 1. Rota Direta (Comum no iMaster NCE IP/Transporte na porta 18008)
+        {"url": f"https://{ip_limpo}:18008/rest/v1/auth/tokens", "tipo": "wan_direto"},
+        
+        # 2. Rota de Assinatura/Token de Segurança OpenAPI Huawei
+        {"url": f"https://{ip_limpo}:18008/rest/openapi/v1/signature", "tipo": "signature"},
+        
+        # 3. Rotas anteriores (mantidas para cobertura)
         {"url": f"https://{ip_limpo}:18008/rest/openapi/v1/auth/tokens", "tipo": "openapi"},
         {"url": f"https://{ip_limpo}:18008/rest/plat/v1/auth/tokens", "tipo": "wan_estrito"},
         {"url": f"https://{ip_limpo}:18002/v1/auth/tokens", "tipo": "campus"}
@@ -30,6 +38,7 @@ def obter_token():
     
     for item in combinacoes:
         url = item["url"]
+        
         if item["tipo"] == "wan_estrito":
             payload = {"authParams": {"userName": USERNAME, "password": PASSWORD}}
         else:
@@ -39,24 +48,25 @@ def obter_token():
             response = requests.post(url, json=payload, headers={"Content-Type": "application/json"}, verify=False, timeout=5)
             if response.status_code in [200, 201]:
                 dados = response.json()
-                if 'data' in dados and 'token_id' in dados['data']:
-                    return dados['data']['token_id']
-                elif 'token' in dados:
-                    return dados['token']
-                elif 'access_token' in dados:
-                    return dados['access_token']
-                elif 'token_id' in dados:
-                    return dados['token_id']
+                
+                # Garante a captura do Token independente do nome da chave retornada
+                for chave_data in ['data', 'authResult']:
+                    if chave_data in dados and 'token_id' in dados[chave_data]:
+                        return dados[chave_data]['token_id']
+                    if chave_data in dados and 'token' in dados[chave_data]:
+                        return dados[chave_data]['token']
+                        
+                if 'token' in dados: return dados['token']
+                if 'access_token' in dados: return dados['access_token']
+                if 'token_id' in dados: return dados['token_id']
             else:
                 erros_tentativas.append(f"Rota {url} retornou HTTP {response.status_code}")
         except Exception as e:
             erros_tentativas.append(f"Rota {url} falhou: {e}")
             continue
             
-    # Guarda os erros para exibir na interface gráfica caso todas falhem
     st.session_state['erros_login'] = erros_tentativas
     return None
-
 @st.cache_data(ttl=300)
 def listar_todos_os_elementos(token):
     ip_limpo = limpar_ip(IMASTER_IP)
