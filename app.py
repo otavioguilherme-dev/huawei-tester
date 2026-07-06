@@ -18,38 +18,56 @@ def limpar_ip(ip):
 # --- 2. FUNÇÕES DE API (PADRÃO WAN CORE) ---
 def obter_token():
     ip_limpo = limpar_ip(IMASTER_IP)
-    url = f"https://{ip_limpo}:18008/rest/plat/v1/auth/tokens"
     
-    # Payload no padrão NCE-IP WAN
-    payload = {
-        "authParams": {
-            "userName": USERNAME,
-            "password": PASSWORD
-        }
-    }
+    # Lista atualizada com as URLs de OpenAPI e RESTCONF do iMaster NCE mais recente
+    combinacoes = [
+        # 1. Nova rota unificada OpenAPI (Comum nas versões recentes na porta 18008)
+        {"url": f"https://{ip_limpo}:18008/rest/openapi/v1/auth/tokens", "tipo": "openapi"},
+        
+        # 2. Rota Legada WAN/IP
+        {"url": f"https://{ip_limpo}:18008/rest/plat/v1/auth/tokens", "tipo": "wan_estrito"},
+        
+        # 3. Rota Legada Campus
+        {"url": f"https://{ip_limpo}:18002/v1/auth/tokens", "tipo": "campus"}
+    ]
     
     requests.packages.urllib3.disable_warnings() 
-    try:
-        response = requests.post(url, json=payload, headers={"Content-Type": "application/json"}, verify=False, timeout=6)
+    
+    for item in combinacoes:
+        url = item["url"]
         
-        # Se falhar no padrão WAN, tenta o payload simples (Campus) na mesma porta
-        if response.status_code not in [200, 201]:
-            payload_simples = {"userName": USERNAME, "password": PASSWORD}
-            response = requests.post(url, json=payload_simples, headers={"Content-Type": "application/json"}, verify=False, timeout=6)
-
-        if response.status_code in [200, 201]:
-            dados = response.json()
-            # Varre as chaves possíveis de token da Huawei
-            if 'data' in dados and 'token_id' in dados['data']:
-                return dados['data']['token_id']
-            elif 'token' in dados:
-                return dados['token']
-            elif 'access_token' in dados:
-                return dados['access_token']
+        # Ajusta o JSON dependendo do padrão da rota
+        if item["tipo"] == "wan_estrito":
+            payload = {"authParams": {"userName": USERNAME, "password": PASSWORD}}
+        elif item["tipo"] == "openapi":
+            # Algumas versões utilizam chaves planas, outras estruturadas
+            payload = {"userName": USERNAME, "password": PASSWORD}
         else:
-            st.error(f"Erro HTTP do iMaster: {response.status_code} - Verifique se o usuário tem perfil de API.")
-    except Exception as e:
-        st.error(f"Erro de timeout/conexão na porta 18008: {e}")
+            payload = {"userName": USERNAME, "password": PASSWORD}
+            
+        try:
+            response = requests.post(
+                url, 
+                json=payload, 
+                headers={"Content-Type": "application/json"}, 
+                verify=False, 
+                timeout=5
+            )
+            
+            if response.status_code in [200, 201]:
+                dados = response.json()
+                # Extração inteligente do Token
+                if 'data' in dados and 'token_id' in dados['data']:
+                    return dados['data']['token_id']
+                elif 'token' in dados:
+                    return dados['token']
+                elif 'access_token' in dados:
+                    return dados['access_token']
+                elif 'token_id' in dados:
+                    return dados['token_id']
+        except Exception:
+            continue
+            
     return None
 
 @st.cache_data(ttl=300)
