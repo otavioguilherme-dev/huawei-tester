@@ -118,5 +118,18 @@ else:
                 elif len(alarmes) == 0:
                     st.success(f"✅ **STATUS: SAUDÁVEL**. O ponto **{site_selecionado}** está operando normalmente sem alarmes.")
                 else:
+                    st.error(f"❌ **STATUS: COM PROBLEMA ({len(alarmes)} alarme(s) ativo(s))**")
+                    
+                    # Formata os alarmes de maneira limpa para o operador ler
+                    dados_tabela = []
+                    for al_item in alarmes:
+                        dados_tabela.append({
+                            "Gravidade": al_item.get('severity'),
+                            "Alarme": al_item.get('alarmName'),
+                            "Componente": al_item.get('objectName'),
+                            "Início do Evento": al_item.get('startTime')
+                        })
+                    st.dataframe(dados_tabela, use_container_width=True)
+    else:
         if token_atual:
             st.warning("⚠️ Conectado ao iMaster, porém nenhuma localidade/site foi encontrado no inventário da API de Campus.")
