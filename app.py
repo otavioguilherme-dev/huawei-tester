@@ -10,148 +10,144 @@ try:
 except Exception:
     config_ok = False
 
-# --- FUNÇÃO AUXILIAR ---
 def limpar_ip(ip):
-    """Remove protocols e barras caso tenham sido digitados por engano"""
     if not ip:
         return ""
     return ip.replace("https://", "").replace("http://", "").strip("/")
 
-# --- 2. FUNÇÕES DE API ---
+# --- 2. FUNÇÕES DE API (PADRÃO WAN CORE) ---
 def obter_token():
     ip_limpo = limpar_ip(IMASTER_IP)
+    url = f"https://{ip_limpo}:18008/rest/plat/v1/auth/tokens"
     
-    # Lista adaptativa incluindo o formato estrito de payload exigido pelo iMaster WAN
-    combinacoes = [
-        {"url": f"https://{ip_limpo}:18008/rest/plat/v1/auth/tokens", "tipo": "wan_estrito"},
-        {"url": f"https://{ip_limpo}:18008/rest/plat/v1/auth/tokens", "tipo": "wan_padrao"},
-        {"url": f"https://{ip_limpo}:18002/v1/auth/tokens", "tipo": "campus"}
-    ]
+    # Payload no padrão NCE-IP WAN
+    payload = {
+        "authParams": {
+            "userName": USERNAME,
+            "password": PASSWORD
+        }
+    }
     
     requests.packages.urllib3.disable_warnings() 
-    
-    for item in combinacoes:
-        url = item["url"]
+    try:
+        response = requests.post(url, json=payload, headers={"Content-Type": "application/json"}, verify=False, timeout=6)
         
-        # Altera o formato do JSON conforme a exigência do módulo do iMaster
-        if item["tipo"] == "wan_estrito":
-            payload = {
-                "authParams": {
-                    "userName": USERNAME,
-                    "password": PASSWORD
-                }
-            }
+        # Se falhar no padrão WAN, tenta o payload simples (Campus) na mesma porta
+        if response.status_code not in [200, 201]:
+            payload_simples = {"userName": USERNAME, "password": PASSWORD}
+            response = requests.post(url, json=payload_simples, headers={"Content-Type": "application/json"}, verify=False, timeout=6)
+
+        if response.status_code in [200, 201]:
+            dados = response.json()
+            # Varre as chaves possíveis de token da Huawei
+            if 'data' in dados and 'token_id' in dados['data']:
+                return dados['data']['token_id']
+            elif 'token' in dados:
+                return dados['token']
+            elif 'access_token' in dados:
+                return dados['access_token']
         else:
-            payload = {
-                "userName": USERNAME,
-                "password": PASSWORD
-            }
-            
-        try:
-            response = requests.post(
-                url, 
-                json=payload, 
-                headers={"Content-Type": "application/json"}, 
-                verify=False, 
-                timeout=5
-            )
-            
-            if response.status_code in [200, 201]:
-                dados_resposta = response.json()
-                if 'data' in dados_resposta and 'token_id' in dados_resposta['data']:
-                    return dados_resposta['data']['token_id']
-                elif 'token' in dados_resposta:
-                    return dados_resposta['token']
-                elif 'access_token' in dados_resposta:
-                    return dados_resposta['access_token']
-        except Exception:
-            continue
-            
+            st.error(f"Erro HTTP do iMaster: {response.status_code} - Verifique se o usuário tem perfil de API.")
+    except Exception as e:
+        st.error(f"Erro de timeout/conexão na porta 18008: {e}")
     return None
 
 @st.cache_data(ttl=300)
-def listar_todos_os_sites(token):
-    """Busca todas as localidades ativas no iMaster para gerar a lista"""
+def listar_todos_os_elementos(token):
+    """Busca os Elementos de Rede (Roteadores/Sites) no padrão NCE-WAN"""
     ip_limpo = limpar_ip(IMASTER_IP)
-    portas = ["18008", "18002"]
+    headers = {"X-AUTH-TOKEN": token, "Content-Type": "application/json"}
     
-    for porta in portas:
-        url = f"https://{ip_limpo}:{porta}/controller/campus/v1/sdwan/net/sites"
-        headers = {"X-AUTH-TOKEN": token, "Content-Type": "application/json"}
-        try:
-            response = requests.get(url, headers=headers, verify=False, timeout=5)
-            if response.status_code == 200:
-                dados = response.json().get('data', [])
-                return {site['name']: site['id'] for site in dados if 'name' in site}
-        except Exception:
-            continue
+    # Rota Nativa de Inventário de Roteadores/Dispositivos (NCE-IP)
+    url = f"https://{ip_limpo}:18008/rest/netconf-data/v1/network-elements"
+    
+    try:
+        response = requests.get(url, headers=headers, verify=False, timeout=8)
+        if response.status_code == 200:
+            dados = response.json().get('network-elements', {}).get('network-element', [])
+            # Se a rota acima funcionar, mapeia Nome do Equipamento -> ID do Equipamento
+            return {ne['name']: ne['ne-id'] for ne in dados if 'name' in ne}
+    except Exception:
+        pass
+        
+    # Rota Alternativa caso a primeira falhe (Campus fallback)
+    url_alt = f"https://{ip_limpo}:18008/controller/campus/v1/sdwan/net/sites"
+    try:
+        response = requests.get(url_alt, headers=headers, verify=False, timeout=8)
+        if response.status_code == 200:
+            dados = response.json().get('data', [])
+            return {site['name']: site['id'] for site in dados if 'name' in site}
+    except Exception:
+        pass
+
     return {}
 
-def buscar_alarmes_por_id(site_id, token):
-    """Interroga os alarmes ativos diretamente pelo ID mapeado"""
+def buscar_alarmes_elemento(ne_id, token):
+    """Busca alarmes ativos filtrados pelo ID do elemento selecionado"""
     ip_limpo = limpar_ip(IMASTER_IP)
-    portas = ["18008", "18002"]
-    last_error = "Sem resposta dos endpoints"
+    headers = {"X-AUTH-TOKEN": token, "Content-Type": "application/json"}
     
-    for porta in portas:
-        url_alarmes = f"https://{ip_limpo}:{porta}/controller/campus/v1/alarms?siteId={site_id}&status=active"
-        headers = {"X-AUTH-TOKEN": token, "Content-Type": "application/json"}
-        try:
-            res_alarmes = requests.get(url_alarmes, headers=headers, verify=False, timeout=5)
-            if res_alarmes.status_code == 200:
-                alarmes = res_alarmes.json().get('data', [])
-                return alarmes, None
-        except Exception as e:
-            last_error = e
-            continue
-    return None, f"Erro ao consultar dados de alarmes nas portas testadas: {last_error}"
+    # Rota universal de alarmes ativos
+    url = f"https://{ip_limpo}:18008/rest/openapi/fault/v1/active-alarms?neId={ne_id}"
+    
+    try:
+        res = requests.get(url, headers=headers, verify=False, timeout=8)
+        if res.status_code == 200:
+            return res.json().get('data', []), None
+    except Exception:
+        pass
+        
+    # Fallback Campus
+    url_alt = f"https://{ip_limpo}:18008/controller/campus/v1/alarms?siteId={ne_id}&status=active"
+    try:
+        res = requests.get(url_alt, headers=headers, verify=False, timeout=8)
+        if res.status_code == 200:
+            return res.json().get('data', []), None
+    except Exception as e:
+        return None, f"Erro ao coletar alarmes: {e}"
 
 # --- 3. INTERFACE GRÁFICA ---
-st.set_page_config(page_title="Troubleshooting iMaster", page_icon="🌐")
-st.title("🌐 Portal de Troubleshooting - iMaster NCE")
+st.set_page_config(page_title="O&M iMaster Huawei", page_icon="🌐")
+st.title("🌐 Portal de Troubleshooting Inteligente - Huawei iMaster")
 
 if not config_ok:
-    st.error("⚠️ Configuração Incompleta! Adicione IMASTER_IP, USERNAME e PASSWORD nos 'Secrets' do Streamlit.")
+    st.error("⚠️ Configuração Incompleta nos Secrets do Streamlit.")
 else:
-    token_atual = None
-    dicionario_sites = {}
-
-    with st.spinner("Autenticando e sincronizando lista de pontos ativos..."):
+    with st.spinner("Conectando ao barramento de API do iMaster..."):
         token_atual = obter_token()
         if token_atual:
-            dicionario_sites = listar_todos_os_sites(token_atual)
+            dicionario_pontos = listar_todos_os_elementos(token_atual)
         else:
-            st.error("❌ Falha na autenticação do iMaster. Verifique as credenciais de API nos Secrets ou as permissões do usuário.")
+            dicionario_pontos = {}
 
-    # Só renderiza os componentes visuais se a lista de sites não estiver vazia
-    if dicionario_sites:
-        st.write("Selecione um ponto abaixo no menu para iniciar a análise automatizada de quedas e perdas.")
+    if dicionario_pontos:
+        st.success(f"Sucesso! {len(dicionario_pontos)} localidades/equipamentos mapeados para monitoramento.")
         
-        lista_nomes = sorted(list(dicionario_sites.keys()))
-        site_selecionado = st.selectbox("Selecione a Localidade para Consulta:", lista_nomes)
+        lista_nomes = sorted(list(dicionario_pontos.keys()))
+        ponto_selecionado = st.selectbox("Selecione o Ponto/Circuito para Análise:", lista_nomes)
         
-        if st.button("Analisar Saúde do Ponto"):
-            id_do_site = dicionario_sites[site_selecionado]
+        if st.button("Executar Troubleshooting"):
+            id_do_ponto = dicionario_pontos[ponto_selecionado]
             
-            with st.spinner(f"Interrogando alarmes de {site_selecionado}..."):
-                alarmes, erro = buscar_alarmes_por_id(id_do_site, token_atual)
+            with st.spinner(f"Verificando integridade física e perdas em {ponto_selecionado}..."):
+                alarmes, erro = buscar_alarmes_elemento(id_do_ponto, token_atual)
                 
                 if erro:
                     st.error(erro)
                 elif len(alarmes) == 0:
-                    st.success(f"✅ **STATUS: SAUDÁVEL**. O ponto **{site_selecionado}** está operando normalmente sem alarmes.")
+                    st.success(f"✅ **STATUS: 100% OPERACIONAL**. O ponto {ponto_selecionado} não apresenta perda de pacotes ou quedas registradas.")
                 else:
-                    st.error(f"❌ **STATUS: COM PROBLEMA ({len(alarmes)} alarme(s) ativo(s))**")
+                    st.error(f"❌ **STATUS: ALERTA DE ANOMALIA ({len(alarmes)} falhas detectadas)**")
                     
                     dados_tabela = []
                     for al_item in alarmes:
                         dados_tabela.append({
-                            "Gravidade": al_item.get('severity'),
-                            "Alarme": al_item.get('alarmName'),
-                            "Componente": al_item.get('objectName'),
-                            "Início do Evento": al_item.get('startTime')
+                            "Gravidade": al_item.get('severity') or al_item.get('perceivedSeverity'),
+                            "Falha/Alarme": al_item.get('alarmName') or al_item.get('alarmIdName'),
+                            "Objeto Afetado": al_item.get('objectName') or al_item.get('neName'),
+                            "Data": al_item.get('startTime') or al_item.get('eventTime')
                         })
                     st.dataframe(dados_tabela, use_container_width=True)
     else:
         if token_atual:
-            st.warning("⚠️ Conectado ao iMaster, porém nenhuma localidade/site foi encontrado no inventário de Campus.")
+            st.warning("⚠️ Conectado com sucesso, mas o inventário retornou vazio. Verifique se o seu perfil de usuário possui escopo de leitura para a topologia.")
