@@ -10,9 +10,9 @@ try:
 except Exception:
     config_ok = False
 
-# --- FUNÇÃO AUXILIAR CORRIGIDA ---
+# --- FUNÇÃO AUXILIAR ---
 def limpar_ip(ip):
-    """Remove protocolos e barras caso tenham sido digitados por engano"""
+    """Remove protocols e barras caso tenham sido digitados por engano"""
     if not ip:
         return ""
     return ip.replace("https://", "").replace("http://", "").strip("/")
@@ -21,10 +21,10 @@ def limpar_ip(ip):
 def obter_token():
     ip_limpo = limpar_ip(IMASTER_IP)
     
-    # Tentaremos as duas portas e caminhos conhecidos na sua versão
+    # Lista adaptativa incluindo o formato estrito de payload exigido pelo iMaster WAN
     combinacoes = [
-        {"url": f"https://{ip_limpo}:18008/rest/plat/v1/auth/tokens", "tipo": "wan_padrao"},
         {"url": f"https://{ip_limpo}:18008/rest/plat/v1/auth/tokens", "tipo": "wan_estrito"},
+        {"url": f"https://{ip_limpo}:18008/rest/plat/v1/auth/tokens", "tipo": "wan_padrao"},
         {"url": f"https://{ip_limpo}:18002/v1/auth/tokens", "tipo": "campus"}
     ]
     
@@ -33,7 +33,7 @@ def obter_token():
     for item in combinacoes:
         url = item["url"]
         
-        # Formata o JSON de acordo com o padrão do módulo correspondente
+        # Altera o formato do JSON conforme a exigência do módulo do iMaster
         if item["tipo"] == "wan_estrito":
             payload = {
                 "authParams": {
@@ -56,10 +56,8 @@ def obter_token():
                 timeout=5
             )
             
-            # Se autenticar, captura o token
             if response.status_code in [200, 201]:
                 dados_resposta = response.json()
-                # O token pode vir em estruturas diferentes dependendo do endpoint
                 if 'data' in dados_resposta and 'token_id' in dados_resposta['data']:
                     return dados_resposta['data']['token_id']
                 elif 'token' in dados_resposta:
@@ -71,13 +69,12 @@ def obter_token():
             
     return None
 
-@st.cache_data(ttl=300) # Guarda a lista por 5 minutos para performance
+@st.cache_data(ttl=300)
 def listar_todos_os_sites(token):
     """Busca todas as localidades ativas no iMaster para gerar a lista"""
     ip_limpo = limpar_ip(IMASTER_IP)
-    
-    # Testa as duas portas principais para o inventário
     portas = ["18008", "18002"]
+    
     for porta in portas:
         url = f"https://{ip_limpo}:{porta}/controller/campus/v1/sdwan/net/sites"
         headers = {"X-AUTH-TOKEN": token, "Content-Type": "application/json"}
@@ -85,7 +82,6 @@ def listar_todos_os_sites(token):
             response = requests.get(url, headers=headers, verify=False, timeout=5)
             if response.status_code == 200:
                 dados = response.json().get('data', [])
-                # Mapeia Nome do Site -> ID do Site
                 return {site['name']: site['id'] for site in dados if 'name' in site}
         except Exception:
             continue
@@ -95,6 +91,7 @@ def buscar_alarmes_por_id(site_id, token):
     """Interroga os alarmes ativos diretamente pelo ID mapeado"""
     ip_limpo = limpar_ip(IMASTER_IP)
     portas = ["18008", "18002"]
+    last_error = "Sem resposta dos endpoints"
     
     for porta in portas:
         url_alarmes = f"https://{ip_limpo}:{porta}/controller/campus/v1/alarms?siteId={site_id}&status=active"
@@ -114,18 +111,19 @@ st.set_page_config(page_title="Troubleshooting iMaster", page_icon="🌐")
 st.title("🌐 Portal de Troubleshooting - iMaster NCE")
 
 if not config_ok:
-    st.error("⚠️ Configuração Incompleta! Você precisa adicionar IMASTER_IP, USERNAME e PASSWORD nos 'Secrets' do Streamlit.")
+    st.error("⚠️ Configuração Incompleta! Adicione IMASTER_IP, USERNAME e PASSWORD nos 'Secrets' do Streamlit.")
 else:
-    # 1. Tenta autenticar e gerar a lista de pontos no início do carregamento da página
+    token_atual = None
+    dicionario_sites = {}
+
     with st.spinner("Autenticando e sincronizando lista de pontos ativos..."):
         token_atual = obter_token()
         if token_atual:
             dicionario_sites = listar_todos_os_sites(token_atual)
         else:
-            dicionario_sites = {}
-            st.error("❌ Falha na autenticação do iMaster. Verifique suas credenciais de API nos Secrets.")
+            st.error("❌ Falha na autenticação do iMaster. Verifique as credenciais de API nos Secrets ou as permissões do usuário.")
 
-    # 2. Se encontrou sites, renderiza o selectbox inteligente
+    # Só renderiza os componentes visuais se a lista de sites não estiver vazia
     if dicionario_sites:
         st.write("Selecione um ponto abaixo no menu para iniciar a análise automatizada de quedas e perdas.")
         
@@ -145,7 +143,6 @@ else:
                 else:
                     st.error(f"❌ **STATUS: COM PROBLEMA ({len(alarmes)} alarme(s) ativo(s))**")
                     
-                    # Formata os alarmes de maneira limpa para o operador ler
                     dados_tabela = []
                     for al_item in alarmes:
                         dados_tabela.append({
@@ -157,4 +154,4 @@ else:
                     st.dataframe(dados_tabela, use_container_width=True)
     else:
         if token_atual:
-            st.warning("⚠️ Conectado ao iMaster, porém nenhuma localidade/site foi encontrado no inventário da API de Campus.")
+            st.warning("⚠️ Conectado ao iMaster, porém nenhuma localidade/site foi encontrado no inventário de Campus.")
