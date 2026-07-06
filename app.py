@@ -21,26 +21,51 @@ def limpar_ip(ip):
 def obter_token():
     ip_limpo = limpar_ip(IMASTER_IP)
     
-    # Lista otimizada incluindo a rota que funciona na porta 18008 constatada
-    rotas_para_testar = [
-        f"https://{ip_limpo}:18008/rest/plat/v1/auth/tokens",                  # Rota ideal (Porta 18008 WAN)
-        f"https://{ip_limpo}:18002/v1/auth/tokens",                            # Rota Campus Padrão
-        f"https://{ip_limpo}:18002/rest/plat/v1/auth/tokens"                   # Rota Alternativa
+    # Tentaremos as duas portas e caminhos conhecidos na sua versão
+    combinacoes = [
+        {"url": f"https://{ip_limpo}:18008/rest/plat/v1/auth/tokens", "tipo": "wan_padrao"},
+        {"url": f"https://{ip_limpo}:18008/rest/plat/v1/auth/tokens", "tipo": "wan_estrito"},
+        {"url": f"https://{ip_limpo}:18002/v1/auth/tokens", "tipo": "campus"}
     ]
     
     requests.packages.urllib3.disable_warnings() 
     
-    for url in rotas_para_testar:
+    for item in combinacoes:
+        url = item["url"]
+        
+        # Formata o JSON de acordo com o padrão do módulo correspondente
+        if item["tipo"] == "wan_estrito":
+            payload = {
+                "authParams": {
+                    "userName": USERNAME,
+                    "password": PASSWORD
+                }
+            }
+        else:
+            payload = {
+                "userName": USERNAME,
+                "password": PASSWORD
+            }
+            
         try:
             response = requests.post(
                 url, 
-                json={"userName": USERNAME, "password": PASSWORD}, 
+                json=payload, 
                 headers={"Content-Type": "application/json"}, 
                 verify=False, 
-                timeout=4
+                timeout=5
             )
+            
+            # Se autenticar, captura o token
             if response.status_code in [200, 201]:
-                return response.json()['data']['token_id']
+                dados_resposta = response.json()
+                # O token pode vir em estruturas diferentes dependendo do endpoint
+                if 'data' in dados_resposta and 'token_id' in dados_resposta['data']:
+                    return dados_resposta['data']['token_id']
+                elif 'token' in dados_resposta:
+                    return dados_resposta['token']
+                elif 'access_token' in dados_resposta:
+                    return dados_resposta['access_token']
         except Exception:
             continue
             
