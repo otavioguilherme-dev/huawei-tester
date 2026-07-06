@@ -19,8 +19,9 @@ def limpar_ip(ip):
 
 # --- 2. FUNÇÕES DE API ---
 def obter_token():
-    ip_limpo = limpar_ip(IMASTER_IP)
-    PORTA_API = "18008"url = f"https://{ip_limpo}:{PORTA_API}/rest/plat/v1/auth/tokens"
+# Separe em duas linhas distintas:
+    PORTA_API = "18008"
+    url = f"https://{ip_limpo}:{PORTA_API}/rest/plat/v1/auth/tokens"
     
     headers = {"Content-Type": "application/json"}
     payload = {"userName": USERNAME, "password": PASSWORD}
