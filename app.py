@@ -118,3 +118,5 @@ else:
                 elif len(alarmes) == 0:
                     st.success(f"✅ **STATUS: SAUDÁVEL**. O ponto **{site_selecionado}** está operando normalmente sem alarmes.")
                 else:
+        if token_atual:
+            st.warning("⚠️ Conectado ao iMaster, porém nenhuma localidade/site foi encontrado no inventário da API de Campus.")
