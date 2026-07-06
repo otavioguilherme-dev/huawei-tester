@@ -1,7 +1,7 @@
+import streamlit as st  # <--- ESSA LINHA PRECISA SER A PRIMEIRA!
 import requests
-import json
 
-# Em vez de fixar os dados, puxe dos Secrets do Streamlit
+# Agora o código vai entender o que é "st"
 IMASTER_IP = st.secrets["IMASTER_IP"]
 USERNAME = st.secrets["USERNAME"]
 PASSWORD = st.secrets["PASSWORD"]
