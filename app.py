@@ -20,7 +20,7 @@ def limpar_ip(ip):
 # --- 2. FUNÇÕES DE API ---
 def obter_token():
     ip_limpo = limpar_ip(IMASTER_IP)
-    PORTA_API = "18002" # Porta padrão comum
+    PORTA_API = "18008" # Porta padrão comum
     
     # Lista de todas as rotas possíveis de autenticação da Huawei
     rotas_para_testar = [
@@ -55,7 +55,7 @@ def obter_token():
     return None
 def buscar_dados_localidade(nome_localidade, token):
     ip_limpo = limpar_ip(IMASTER_IP)
-    PORTA_API = "18002"
+    PORTA_API = "18008"
     headers = {"X-AUTH-TOKEN": token, "Content-Type": "application/json"}
     
     url_site = f"https://{ip_limpo}:{PORTA_API}/controller/campus/v1/sdwan/net/sites?name={nome_localidade}"
