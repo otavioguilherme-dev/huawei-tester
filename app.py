@@ -1,10 +1,10 @@
 import requests
 import json
 
-# Configurações do iMaster NCE
-IMASTER_IP = "https://159.138.213.219:18008" # Altere para o IP do seu iMaster
-USERNAME = "api-otavio"
-PASSWORD = "Ot@vio2912"
+# Em vez de fixar os dados, puxe dos Secrets do Streamlit
+IMASTER_IP = st.secrets["IMASTER_IP"]
+USERNAME = st.secrets["USERNAME"]
+PASSWORD = st.secrets["PASSWORD"]
 
 def obter_token():
     """1. Autentica na API do iMaster e obtém o Token de Acesso"""
