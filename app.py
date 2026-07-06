@@ -19,8 +19,10 @@ def limpar_ip(ip):
 
 # --- 2. FUNÇÕES DE API ---
 def obter_token():
-# Separe em duas linhas distintas:
-    PORTA_API = "18008"
+    # ESSA LINHA ABAIXO PRECISA EXISTIR (Ela cria a variável ip_limpo):
+    ip_limpo = limpar_ip(IMASTER_IP) 
+    
+    PORTA_API = "18002"
     url = f"https://{ip_limpo}:{PORTA_API}/rest/plat/v1/auth/tokens"
     
     headers = {"Content-Type": "application/json"}
@@ -34,7 +36,7 @@ def obter_token():
             st.error(f"Falha na autenticação do iMaster. Status: {response.status_code}")
             return None
     except Exception as e:
-        st.error(f"Erro de conexão com o iMaster ao gerar Token: {e}")
+        st.error(f"Erro de conexão com o iMaster: {e}")
         return None
 
 def buscar_dados_localidade(nome_localidade, token):
